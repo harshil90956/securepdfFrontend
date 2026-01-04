@@ -8,6 +8,7 @@ import { TicketPropertiesPanel } from './TicketPropertiesPanel';
 import { buildFinalRenderPayload } from '@/utils/buildFinalRenderPayload';
 import { useAuth } from '@/hooks/useAuth';
 import { api, apiUrl } from '@/config/api';
+import { PDFDocument, StandardFonts } from 'pdf-lib';
 
 type TicketCropMmOverride = {
   xMm: number | null;
@@ -117,6 +118,8 @@ export const TicketEditor: React.FC<TicketEditorProps> = ({ pdfUrl, fileType = '
   const [seriesSlots, setSeriesSlots] = useState<SeriesSlotData[]>([]);
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
 
+  const [pdfFontCache, setPdfFontCache] = useState<Map<string, any>>(() => new Map());
+
   const mergedAvailableFonts = useMemo(() => {
     const uploaded = customFonts.map((f) => f.family);
     const system = (availableFonts || []).filter((f) => !uploaded.includes(f));
@@ -144,6 +147,41 @@ export const TicketEditor: React.FC<TicketEditorProps> = ({ pdfUrl, fileType = '
       cancelled = true;
     };
   }, [token]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const keys = new Set<string>();
+      for (const slot of seriesSlots) {
+        const name = String((slot as any)?.fontFamily || '').toLowerCase();
+        if (name.includes('times')) keys.add(StandardFonts.TimesRoman);
+        else if (name.includes('courier')) keys.add(StandardFonts.Courier);
+        else keys.add(StandardFonts.Helvetica);
+      }
+
+      const missing = Array.from(keys).filter((k) => !pdfFontCache.has(k));
+      if (!missing.length) return;
+
+      const pdfDoc = await PDFDocument.create();
+      const entries: Array<[string, any]> = [];
+      for (const k of missing) {
+        const font = await pdfDoc.embedFont(k as any);
+        entries.push([k, font]);
+      }
+      if (cancelled) return;
+      setPdfFontCache((prev) => {
+        const next = new Map(prev);
+        for (const [k, v] of entries) next.set(k, v);
+        return next;
+      });
+    })().catch(() => {
+      // ignore
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pdfFontCache, seriesSlots]);
 
   // Calculate ending series
   const calculateEndingSeries = useCallback((start: string, totalTickets: number): string => {
@@ -1342,25 +1380,44 @@ export const TicketEditor: React.FC<TicketEditorProps> = ({ pdfUrl, fileType = '
                 {seriesSlots
                   .filter((slot) => typeof slot.x_mm === 'number' && Number.isFinite(slot.x_mm) && typeof slot.y_mm === 'number' && Number.isFinite(slot.y_mm))
                   .map((slot) => {
-                    const left = mmToPxX(Number(slot.x_mm));
-                    const baselineY = mmToPxY(Number(slot.y_mm));
+                    const anchorX = mmToPxX(Number(slot.x_mm));
+                    const anchorBaselineY = mmToPxY(Number(slot.y_mm));
                     const ghostText = String(slot.startingSeries || startingSeries);
 
-                    const ghostFontFamily = String((slot as any).fontFamily || 'Arial');
-                    const fontSizePx = mmToPxY(Number(seriesFontSizeMm));
-                    const textWidthPx = measureTextWidthPx(ghostText, fontSizePx, ghostFontFamily);
-                    const width = Math.max(1, textWidthPx);
-
-                    const BASE_FONT_SIZE_PX = 24;
-                    const desiredFontSizePx = Math.max(1, Number((slot as any).defaultFontSize ?? BASE_FONT_SIZE_PX) || BASE_FONT_SIZE_PX);
-
-                    const boxHeight = fontSizePx * 1.1;
-                    const baselineOffset = fontSizePx * 0.8;
-                    const boxTop = baselineY - baselineOffset;
-                    const baselineInBoxY = baselineOffset;
+                    const name = String((slot as any)?.fontFamily || '').toLowerCase();
+                    const fontKey = name.includes('times') ? StandardFonts.TimesRoman : name.includes('courier') ? StandardFonts.Courier : StandardFonts.Helvetica;
+                    const pdfFont = pdfFontCache.get(fontKey);
+                    if (!pdfFont) return null;
 
                     const rot = Number((slot as any).rotation_deg ?? slot.rotation ?? 0);
                     const isSelected = selectedSlotId === slot.id;
+
+                    const glyphs = String(ghostText).split('').map((ch, i) => {
+                      const rawSize = Number((slot as any).letterStyles?.[i]?.fontSize ?? (slot as any).defaultFontSize ?? 24);
+                      const size = Number.isFinite(rawSize) && rawSize > 0 ? rawSize : 24;
+                      const rawOffset = Number((slot as any).letterStyles?.[i]?.offsetY ?? 0);
+                      const offsetY = Number.isFinite(rawOffset) ? rawOffset : 0;
+                      const ascent = Number(pdfFont.heightAtSize(size, { descender: false }));
+                      const advance = Number(pdfFont.widthOfTextAtSize(ch, size));
+                      return {
+                        ch,
+                        size,
+                        offsetY,
+                        ascent: Number.isFinite(ascent) ? ascent : 0,
+                        advance: Number.isFinite(advance) ? advance : 0,
+                      };
+                    });
+
+                    let cursorX = 0;
+                    const positioned = glyphs.map((g) => {
+                      const x = cursorX;
+                      cursorX += g.advance;
+                      return { ...g, x };
+                    });
+
+                    const textWidth = Math.max(1, cursorX);
+                    const baselineGuideY = 0;
+
                     return (
                       <div
                         key={slot.id}
@@ -1370,59 +1427,63 @@ export const TicketEditor: React.FC<TicketEditorProps> = ({ pdfUrl, fileType = '
                         onPointerUp={handleSlotPointerUp}
                         style={{
                           position: 'absolute',
-                          left,
-                          top: boxTop,
-                          width,
-                          height: boxHeight,
-                          border: isSelected ? '1px solid #22c55e' : '1px dashed #22c55e',
-                          background: 'rgba(34, 197, 94, 0.08)',
-                          borderRadius: 2,
+                          left: anchorX,
+                          top: anchorBaselineY,
+                          width: Math.max(20, textWidth),
+                          height: 1,
                           transform: `rotate(${rot}deg)`,
-                          transformOrigin: 'top left',
+                          transformOrigin: '0px 0px',
                           pointerEvents: 'auto',
-                          boxSizing: 'border-box',
-                          padding: 0,
-                          margin: 0,
-                          overflow: 'visible',
-                          zIndex: 10,
+                          zIndex: isSelected ? 20 : 10,
                         }}
                       >
                         <div
-                          className="series-ghost-text"
                           style={{
-                            fontFamily: ghostFontFamily,
-                            fontSize: BASE_FONT_SIZE_PX,
-                            color: 'rgba(0,0,0,0.6)',
-                            pointerEvents: 'none',
-                            userSelect: 'none',
-                            padding: 0,
-                            margin: 0,
-                            whiteSpace: 'pre',
-                            lineHeight: '1',
                             position: 'absolute',
                             left: 0,
-                            top: baselineInBoxY - BASE_FONT_SIZE_PX,
+                            top: baselineGuideY,
+                            width: Math.max(20, textWidth),
+                            height: 1,
+                            background: 'rgba(34, 197, 94, 0.9)',
+                            pointerEvents: 'none',
+                          }}
+                        />
+                        <div
+                          style={{
+                            position: 'absolute',
+                            left: -5,
+                            top: -5,
+                            width: 11,
+                            height: 11,
+                            pointerEvents: 'none',
                           }}
                         >
-                          {String(ghostText)
-                            .split('')
-                            .map((ch, i) => {
-                              const letterSizePx = Math.max(1, Number((slot as any).letterStyles?.[i]?.fontSize ?? (slot as any).defaultFontSize ?? desiredFontSizePx) || desiredFontSizePx);
-                              const letterScale = letterSizePx / BASE_FONT_SIZE_PX;
-                              return (
-                                <span
-                                  key={i}
-                                  style={{
-                                    display: 'inline-block',
-                                    transform: `scale(${letterScale})`,
-                                    transformOrigin: 'center top',
-                                  }}
-                                >
-                                  {ch === ' ' ? '\u00A0' : ch}
-                                </span>
-                              );
-                            })}
+                          <div style={{ position: 'absolute', left: 5, top: 0, width: 1, height: 11, background: 'rgba(34, 197, 94, 0.95)' }} />
+                          <div style={{ position: 'absolute', left: 0, top: 5, width: 11, height: 1, background: 'rgba(34, 197, 94, 0.95)' }} />
                         </div>
+
+                        {positioned.map((g, i) => {
+                          const drawCh = g.ch === ' ' ? '\u00A0' : g.ch;
+                          return (
+                            <span
+                              key={i}
+                              style={{
+                                position: 'absolute',
+                                left: g.x,
+                                top: baselineGuideY - g.ascent + g.offsetY,
+                                fontFamily: String((slot as any).fontFamily || 'Arial'),
+                                fontSize: g.size,
+                                color: String((slot as any).color || 'rgba(0,0,0,0.6)'),
+                                whiteSpace: 'pre',
+                                lineHeight: '1',
+                                pointerEvents: 'none',
+                                userSelect: 'none',
+                              }}
+                            >
+                              {drawCh}
+                            </span>
+                          );
+                        })}
                       </div>
                     );
                   })}
