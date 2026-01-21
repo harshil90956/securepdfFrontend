@@ -488,7 +488,6 @@ export const TicketEditor: React.FC<TicketEditorProps> = ({ pdfUrl, fileType = '
 
         const res = await fetch(apiUrl('/api/normalize-svg'), {
           method: 'POST',
-          credentials: 'include',
           headers: {
             'content-type': 'application/json',
             ...headers,
