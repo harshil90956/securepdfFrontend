@@ -156,25 +156,24 @@ const Upload = () => {
 
       const data = res.data as any;
 
-      const uploadedDocumentId = String(data?.document?.documentId || '');
+      const uploadedDocumentId = String(
+        data?.document?.documentId ||
+          data?.document?.documentID ||
+          data?.document?._id ||
+          data?.documentId ||
+          data?._id ||
+          ''
+      );
       const uploadedDocumentType = String(data?.document?.documentType || 'pdf') as 'pdf' | 'svg';
+
+      if (!uploadedDocumentId) {
+        console.error('[UPLOAD_SUCCESS] Missing documentId in upload response', { dataKeys: Object.keys(data || {}) });
+        throw new Error('Upload succeeded but documentId is missing in response');
+      }
 
       if (uploadedDocumentId) {
         try {
           sessionStorage.setItem('sph:lastDocumentId', uploadedDocumentId);
-        } catch {
-          // ignore
-        }
-      }
-
-      console.log('[UPLOAD_SUCCESS]', {
-        documentId: uploadedDocumentId,
-        status: 'SUCCESS',
-      });
-
-      if (uploadedDocumentId && ticketCropMmForClient) {
-        try {
-          sessionStorage.setItem(`ticketCropMm:${uploadedDocumentId}`, JSON.stringify(ticketCropMmForClient));
         } catch {
           // ignore
         }
