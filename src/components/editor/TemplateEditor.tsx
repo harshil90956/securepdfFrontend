@@ -124,12 +124,22 @@ export const TemplateEditor: React.FC<TemplateEditorProps> = ({ pdfCanvasRef, pd
     );
   };
 
+  const formatSeriesValue = (prefix: string, num: number, width: number): string => {
+    const raw = String(Math.trunc(num));
+    if (width > 0) {
+      const padded = raw.padStart(width, '0');
+      const finalDigits = padded.length > width ? padded.slice(padded.length - width) : padded;
+      return `${prefix}${finalDigits}`;
+    }
+    return `${prefix}${raw}`;
+  };
+
   const incrementSeries = (value: string, increment: number): string => {
     const match = value.match(/^(.*?)(\d+)$/);
     if (match) {
       const [, prefix, numStr] = match;
       const num = parseInt(numStr, 10) + increment;
-      return `${prefix}${num.toString().padStart(numStr.length, '0')}`;
+      return formatSeriesValue(prefix, num, numStr.length);
     }
     return value;
   };
@@ -151,7 +161,7 @@ export const TemplateEditor: React.FC<TemplateEditorProps> = ({ pdfCanvasRef, pd
       const end = parseInt(endNum, 10);
       const padLength = startNum.length;
       return Array.from({ length: end - start + 1 }, (_, i) => 
-        `${prefix}${(start + i).toString().padStart(padLength, '0')}`
+        formatSeriesValue(prefix, start + i, padLength)
       );
     }
     

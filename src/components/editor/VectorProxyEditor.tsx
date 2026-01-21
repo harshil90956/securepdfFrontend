@@ -514,16 +514,88 @@ export const VectorProxyEditor: React.FC<{
 
   const endingSeries = useMemo(() => calculateEndingSeries(startingSeries, totalPages * 4), [startingSeries, totalPages]);
 
+  const formatSeriesValue = useCallback((prefix: string, num: number, width: number) => {
+    const raw = String(Math.trunc(num));
+    if (width > 0) {
+      const padded = raw.padStart(width, '0');
+      const finalDigits = padded.length > width ? padded.slice(padded.length - width) : padded;
+      return `${prefix}${finalDigits}`;
+    }
+    return `${prefix}${raw}`;
+  }, []);
+
+  const applyNumericTemplate = useCallback((template: string, digits: string) => {
+    const out: string[] = [];
+    let j = 0;
+    for (let i = 0; i < template.length; i += 1) {
+      const ch = template[i] ?? '';
+      if (ch >= '0' && ch <= '9') {
+        out.push(digits[j] ?? '0');
+        j += 1;
+      } else {
+        out.push(ch);
+      }
+    }
+    return out.join('');
+  }, []);
+
+  const parseSeriesPattern = useCallback((value: string) => {
+    const str = String(value ?? '');
+    let end = str.length - 1;
+    while (end >= 0 && str[end] === ' ') end -= 1;
+    if (end < 0) return null;
+    if (str[end] < '0' || str[end] > '9') return null;
+
+    let i = end;
+    const numericPartReversed: string[] = [];
+
+    while (i >= 0) {
+      const ch = str[i];
+      if (ch >= '0' && ch <= '9') {
+        numericPartReversed.push(ch);
+        i -= 1;
+        continue;
+      }
+      if (ch === ' ') {
+        const prev = i > 0 ? str[i - 1] : '';
+        if (prev >= '0' && prev <= '9') {
+          numericPartReversed.push(ch);
+          i -= 1;
+          continue;
+        }
+      }
+      break;
+    }
+
+    const numericPart = numericPartReversed.reverse().join('');
+    const digits = numericPart.replace(/\s+/g, '');
+    if (!digits) return null;
+    return { prefix: str.slice(0, i + 1), digits, numericPart };
+  }, []);
+
+  const sanitizeSeriesInput = useCallback(
+    (value: string) => {
+      const parsed = parseSeriesPattern(value);
+      if (!parsed) return value;
+      return `${parsed.prefix}${parsed.digits}`;
+    },
+    [parseSeriesPattern]
+  );
+
   const incrementSeries = useCallback((value: string, increment: number): string => {
-    const match = value.match(/^(.*?)(\d+)$/);
-    if (match) {
-      const [, prefix, numStr] = match;
-      const num = parseInt(numStr, 10);
+    const parsed = parseSeriesPattern(value);
+    if (parsed) {
+      const num = parseInt(parsed.digits, 10);
       const endNum = num + increment;
-      return `${prefix}${endNum.toString().padStart(numStr.length, '0')}`;
+      if (parsed.numericPart && /\s/.test(parsed.numericPart)) {
+        const numStr = String(Math.trunc(endNum)).padStart(parsed.digits.length, '0');
+        const finalDigits = numStr.length > parsed.digits.length ? numStr.slice(numStr.length - parsed.digits.length) : numStr;
+        return `${parsed.prefix}${applyNumericTemplate(parsed.numericPart, finalDigits)}`;
+      }
+      return formatSeriesValue(parsed.prefix, endNum, parsed.digits.length);
     }
     return value;
-  }, []);
+  }, [applyNumericTemplate, parseSeriesPattern, formatSeriesValue]);
 
   const handleGenerateOutput = useCallback(async () => {
     if (isGenerating) {
@@ -600,27 +672,31 @@ export const VectorProxyEditor: React.FC<{
       const firstPage = pages[0];
       if (!firstPage) throw new Error('No pages to generate');
 
-      const parseSeriesPattern = (value: string) => {
-        const str = String(value || '').trim();
-        const m = str.match(/^(.*?)(\d+)$/);
-        if (!m) return null;
-        return { prefix: m[1], start: Number(m[2]), padLength: m[2].length };
-      };
-
       const series = firstPage.seriesSlots.map((slot) => {
         const firstTicket = firstPage.tickets?.[0];
         const firstSeriesValue = firstTicket?.seriesBySlot?.[slot.id]?.seriesValue ?? '';
         const parsed = parseSeriesPattern(firstSeriesValue);
         const letterStyles = firstTicket?.seriesBySlot?.[slot.id]?.letterStyles;
-        const letterFontSizes = Array.isArray(letterStyles) ? letterStyles.map((ls) => ls.fontSize) : undefined;
-        const letterOffsets = Array.isArray(letterStyles) ? letterStyles.map((ls) => ls.offsetY) : undefined;
+        const basePx = Number(slot.defaultFontSize || 0);
+        const rawFontSizes = Array.isArray(letterStyles) ? letterStyles.map((ls) => Number(ls?.fontSize || 0)) : null;
+        const rawOffsets = Array.isArray(letterStyles) ? letterStyles.map((ls) => Number(ls?.offsetY || 0)) : null;
+        const hasFontSizeCustomization =
+          Array.isArray(rawFontSizes) &&
+          Number.isFinite(basePx) &&
+          basePx > 0 &&
+          rawFontSizes.some((px) => Number.isFinite(px) && px > 0 && Math.abs(px - basePx) > 1e-6);
+
+        const hasOffsetCustomization = Array.isArray(rawOffsets) && rawOffsets.some((oy) => Number.isFinite(oy) && Math.abs(oy) > 1e-9);
+
+        const letterFontSizes = hasFontSizeCustomization && rawFontSizes ? rawFontSizes : undefined;
+        const letterOffsets = hasOffsetCustomization && rawOffsets ? rawOffsets : undefined;
 
         return {
           id: slot.id,
           prefix: parsed?.prefix ?? '',
-          start: Number.isFinite(parsed?.start) ? parsed!.start : 1,
+          start: parsed ? Number(parsed.digits) : 1,
           step: Number.isFinite((slot as any).seriesIncrement) ? Number((slot as any).seriesIncrement) : 1,
-          padLength: Number.isFinite(parsed?.padLength) ? parsed!.padLength : 0,
+          padLength: parsed ? parsed.digits.length : 0,
           font: slot.fontFamily || 'Helvetica',
           fontSize: slot.defaultFontSize || 24,
           letterFontSizes,
@@ -674,14 +750,20 @@ export const VectorProxyEditor: React.FC<{
       }
       const resolvedFontSizeMm = pxToMm(slotDefaultFontSizePx);
       const resolvedFontFamily = String(slot0?.fontFamily || 'Helvetica');
-      const perLetterFontSizeMm = startingSeries
-        ? String(startingSeries)
-            .split('')
-            .map((_, idx) => {
-              const px = Number(slot0?.letterStyles?.[idx]?.fontSize ?? slot0?.defaultFontSize);
-              return Number.isFinite(px) && px > 0 ? pxToMm(px) : resolvedFontSizeMm;
-            })
-        : undefined;
+      const resolvedLetterSpacingMm = (() => {
+        const px = Number(slot0?.letterSpacingPx ?? 0);
+        return Number.isFinite(px) && px > 0 ? pxToMm(px) : 0;
+      })();
+      const perLetterFontSizeMm = (() => {
+        if (!startingSeries) return undefined;
+        const chars = String(startingSeries).split('');
+        const sizes = chars.map((_, idx) => {
+          const px = Number(slot0?.letterStyles?.[idx]?.fontSize ?? slotDefaultFontSizePx);
+          return Number.isFinite(px) && px > 0 ? pxToMm(px) : resolvedFontSizeMm;
+        });
+        const hasCustomization = sizes.some((mm) => Math.abs(mm - resolvedFontSizeMm) > 1e-6);
+        return hasCustomization ? sizes : undefined;
+      })();
 
       const payload = buildFinalRenderPayload({
         jobId,
@@ -701,7 +783,7 @@ export const VectorProxyEditor: React.FC<{
         seriesFontFamily: resolvedFontFamily,
         seriesFontSizeMm: resolvedFontSizeMm,
         perLetterFontSizeMm,
-        seriesLetterSpacingMm: 0,
+        seriesLetterSpacingMm: resolvedLetterSpacingMm,
         seriesRotationDeg: 0,
         seriesColor: String(slot0?.color || '#000000'),
       });
@@ -809,6 +891,7 @@ export const VectorProxyEditor: React.FC<{
       value: startingSeries,
       startingSeries: startingSeries,
       seriesIncrement: 1,
+      letterSpacingPx: 0,
       letterStyles,
       defaultFontSize: 24,
       fontFamily: 'Arial',
@@ -847,71 +930,6 @@ export const VectorProxyEditor: React.FC<{
 
     toast.success('Series slot deleted');
   }, [seriesSlots, selectedSlotId]);
-
-  const handleUpdateSlot = useCallback(
-    (updates: Partial<SeriesSlotData>) => {
-      if (!selectedSlotId) return;
-
-      setSeriesSlots((prev) =>
-        prev.map((slot) => {
-          if (slot.id !== selectedSlotId) return slot;
-
-          const updated: SeriesSlotData = { ...slot, ...updates };
-
-          if (updates.value && updates.value !== slot.value) {
-            const newLength = updates.value.length;
-            const currentStyles = slot.letterStyles || [];
-
-            const newLetterStyles: any[] = [];
-            for (let i = 0; i < newLength; i++) {
-              newLetterStyles.push(currentStyles[i] || { fontSize: slot.defaultFontSize, offsetY: 0 });
-            }
-            updated.letterStyles = newLetterStyles;
-            setStartingSeries(updates.value);
-          }
-
-          return updated;
-        })
-      );
-    },
-    [selectedSlotId]
-  );
-
-  const handleUpdateLetterFontSize = useCallback(
-    (index: number, fontSize: number) => {
-      if (!selectedSlotId) return;
-
-      setSeriesSlots((prev) =>
-        prev.map((slot) => {
-          if (slot.id !== selectedSlotId) return slot;
-
-          const newLetterStyles = [...(slot.letterStyles || [])];
-          newLetterStyles[index] = { ...newLetterStyles[index], fontSize };
-
-          return { ...slot, letterStyles: newLetterStyles };
-        })
-      );
-    },
-    [selectedSlotId]
-  );
-
-  const handleUpdateLetterOffset = useCallback(
-    (index: number, offsetY: number) => {
-      if (!selectedSlotId) return;
-
-      setSeriesSlots((prev) =>
-        prev.map((slot) => {
-          if (slot.id !== selectedSlotId) return slot;
-
-          const newLetterStyles = [...(slot.letterStyles || [])];
-          newLetterStyles[index] = { ...newLetterStyles[index], offsetY };
-
-          return { ...slot, letterStyles: newLetterStyles };
-        })
-      );
-    },
-    [selectedSlotId]
-  );
 
   const handleUploadFont = useCallback((file: File) => {
     const allowedTypes = [

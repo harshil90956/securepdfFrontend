@@ -173,6 +173,28 @@ export const TicketPropertiesPanel: React.FC<TicketPropertiesPanelProps> = ({
               ))}
             </div>
           </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs text-foreground">Letter Spacing (px)</Label>
+            <div className="flex items-center gap-2">
+              <Slider
+                value={[Number(slot.letterSpacingPx ?? 0)]}
+                onValueChange={([v]) => onUpdateSlot({ letterSpacingPx: v })}
+                min={0}
+                max={50}
+                step={1}
+                className="flex-1"
+              />
+              <Input
+                type="number"
+                value={Number(slot.letterSpacingPx ?? 0)}
+                onChange={(e) => onUpdateSlot({ letterSpacingPx: Math.max(0, parseInt(e.target.value) || 0) })}
+                className="w-16 h-7 text-xs"
+                min={0}
+                max={200}
+              />
+            </div>
+          </div>
         </div>
 
         <Separator />

@@ -23,6 +23,7 @@ export interface SeriesSlotData {
   startingSeries?: string;
   // Optional per-slot increment (defaults to 1 if not set)
   seriesIncrement?: number;
+  letterSpacingPx?: number;
   letterStyles: LetterStyle[]; // per-letter font sizes
   defaultFontSize: number;
   fontFamily: string;
@@ -142,6 +143,9 @@ export const SeriesSlot: React.FC<SeriesSlotProps> = ({
 
   // Render each letter with individual font size
   const renderLetters = () => {
+    const spacingPx = Number(slot.letterSpacingPx ?? 0);
+    const spacing = Number.isFinite(spacingPx) ? spacingPx * slotScale : 0;
+
     return slot.value.split('').map((letter, index) => {
       const letterStyle = slot.letterStyles[index];
       const fontSize = letterStyle?.fontSize || slot.defaultFontSize;
@@ -155,6 +159,7 @@ export const SeriesSlot: React.FC<SeriesSlotProps> = ({
             fontFamily: slot.fontFamily,
             color: slot.color,
             display: 'inline-block',
+            marginRight: index === slot.value.length - 1 ? 0 : spacing,
             transform: `translateY(${offsetY * slotScale}px)`,
           }}
         >

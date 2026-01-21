@@ -183,32 +183,109 @@ export const TicketEditor: React.FC<TicketEditorProps> = ({ pdfUrl, fileType = '
     };
   }, [pdfFontCache, seriesSlots]);
 
+  const formatSeriesValue = useCallback((prefix: string, num: number, width: number) => {
+    const raw = String(Math.trunc(num));
+    if (width > 0) {
+      const padded = raw.padStart(width, '0');
+      const finalDigits = padded.length > width ? padded.slice(padded.length - width) : padded;
+      return `${prefix}${finalDigits}`;
+    }
+    return `${prefix}${raw}`;
+  }, []);
+
+  const applyNumericTemplate = useCallback((template: string, digits: string) => {
+    const out: string[] = [];
+    let j = 0;
+    for (let i = 0; i < template.length; i += 1) {
+      const ch = template[i] ?? '';
+      if (ch >= '0' && ch <= '9') {
+        out.push(digits[j] ?? '0');
+        j += 1;
+      } else {
+        out.push(ch);
+      }
+    }
+    return out.join('');
+  }, []);
+
+  const parseSeriesPattern = useCallback((value: string) => {
+    const str = String(value ?? '');
+    let end = str.length - 1;
+    while (end >= 0 && str[end] === ' ') end -= 1;
+    if (end < 0) return null;
+    if (str[end] < '0' || str[end] > '9') return null;
+
+    let i = end;
+    const numericPartReversed: string[] = [];
+
+    while (i >= 0) {
+      const ch = str[i];
+      if (ch >= '0' && ch <= '9') {
+        numericPartReversed.push(ch);
+        i -= 1;
+        continue;
+      }
+      if (ch === ' ') {
+        const prev = i > 0 ? str[i - 1] : '';
+        if (prev >= '0' && prev <= '9') {
+          numericPartReversed.push(ch);
+          i -= 1;
+          continue;
+        }
+      }
+      break;
+    }
+
+    const numericPart = numericPartReversed.reverse().join('');
+    const digits = numericPart.replace(/\s+/g, '');
+    if (!digits) return null;
+    return { prefix: str.slice(0, i + 1), digits, numericPart };
+  }, []);
+
+  const sanitizeSeriesInput = useCallback(
+    (value: string) => {
+      const parsed = parseSeriesPattern(value);
+      if (!parsed) return value;
+      return `${parsed.prefix}${parsed.digits}`;
+    },
+    [parseSeriesPattern]
+  );
+
   // Calculate ending series
   const calculateEndingSeries = useCallback((start: string, totalTickets: number): string => {
-    const match = start.match(/^(.*?)(\d+)$/);
-    if (match) {
-      const [, prefix, numStr] = match;
-      const startNum = parseInt(numStr, 10);
+    const parsed = parseSeriesPattern(start);
+    if (parsed) {
+      const startNum = parseInt(parsed.digits, 10);
       const endNum = startNum + totalTickets - 1;
-      return `${prefix}${endNum.toString().padStart(numStr.length, '0')}`;
+      const base = formatSeriesValue(parsed.prefix, endNum, parsed.digits.length);
+      if (parsed.numericPart && /\s/.test(parsed.numericPart)) {
+        const numStr = String(Math.trunc(endNum)).padStart(parsed.digits.length, '0');
+        const finalDigits = numStr.length > parsed.digits.length ? numStr.slice(numStr.length - parsed.digits.length) : numStr;
+        return `${parsed.prefix}${applyNumericTemplate(parsed.numericPart, finalDigits)}`;
+      }
+      return base;
     }
     return start;
-  }, []);
+  }, [applyNumericTemplate, parseSeriesPattern, formatSeriesValue]);
 
   // 4 tickets per page
   const endingSeries = useMemo(() => calculateEndingSeries(startingSeries, totalPages * 4), [startingSeries, totalPages, calculateEndingSeries]);
 
   // Increment series - preserve spaces and other characters
   const incrementSeries = useCallback((value: string, increment: number): string => {
-    const match = value.match(/^(.*?)(\d+)$/);
-    if (match) {
-      const [, prefix, numStr] = match;
-      const num = parseInt(numStr, 10);
+    const parsed = parseSeriesPattern(value);
+    if (parsed) {
+      const num = parseInt(parsed.digits, 10);
       const endNum = num + increment;
-      return `${prefix}${endNum.toString().padStart(numStr.length, '0')}`;
+      if (parsed.numericPart && /\s/.test(parsed.numericPart)) {
+        const numStr = String(Math.trunc(endNum)).padStart(parsed.digits.length, '0');
+        const finalDigits = numStr.length > parsed.digits.length ? numStr.slice(numStr.length - parsed.digits.length) : numStr;
+        return `${parsed.prefix}${applyNumericTemplate(parsed.numericPart, finalDigits)}`;
+      }
+      return formatSeriesValue(parsed.prefix, endNum, parsed.digits.length);
     }
     return value;
-  }, []);
+  }, [applyNumericTemplate, parseSeriesPattern, formatSeriesValue]);
 
   const selectedSlot = useMemo(() => {
     if (!selectedSlotId) return null;
@@ -260,6 +337,7 @@ export const TicketEditor: React.FC<TicketEditorProps> = ({ pdfUrl, fileType = '
       value: startingSeries,
       startingSeries,
       seriesIncrement: 1,
+      letterSpacingPx: 0,
       letterStyles,
       defaultFontSize: 24,
       fontFamily: 'Arial',
@@ -594,23 +672,28 @@ export const TicketEditor: React.FC<TicketEditorProps> = ({ pdfUrl, fileType = '
       const resolvedYMm = primarySlot?.y_mm ?? null;
       const resolvedRotationDeg = Number(primarySlot?.rotation ?? 0);
       const resolvedColor = String(primarySlot?.color || '#000000');
-      const resolvedLetterSpacingMm = 0;
       const resolvedFontFamily = String((primarySlot as any)?.fontFamily || 'Helvetica');
 
       const pxToMm = (px: number) => px * 0.264583;
+      const resolvedLetterSpacingMm = (() => {
+        const px = Number((primarySlot as any)?.letterSpacingPx ?? 0);
+        return Number.isFinite(px) && px > 0 ? pxToMm(px) : 0;
+      })();
       const slotDefaultFontSizePx = Number(primarySlot?.defaultFontSize);
       if (!(Number.isFinite(slotDefaultFontSizePx) && slotDefaultFontSizePx > 0)) {
         throw new Error('Invalid default font size (px)');
       }
       const resolvedFontSizeMm = pxToMm(slotDefaultFontSizePx);
-      const perLetterFontSizeMm = primarySlot?.value
-        ? String(primarySlot.value)
-            .split('')
-            .map((_, idx) => {
-              const px = Number(primarySlot.letterStyles?.[idx]?.fontSize ?? primarySlot.defaultFontSize);
-              return Number.isFinite(px) && px > 0 ? pxToMm(px) : resolvedFontSizeMm;
-            })
-        : undefined;
+      const perLetterFontSizeMm = (() => {
+        if (!primarySlot?.value) return undefined;
+        const chars = String(primarySlot.value).split('');
+        const sizes = chars.map((_, idx) => {
+          const px = Number(primarySlot.letterStyles?.[idx]?.fontSize ?? slotDefaultFontSizePx);
+          return Number.isFinite(px) && px > 0 ? pxToMm(px) : resolvedFontSizeMm;
+        });
+        const hasCustomization = sizes.some((mm) => Math.abs(mm - resolvedFontSizeMm) > 1e-6);
+        return hasCustomization ? sizes : undefined;
+      })();
 
       if (!(typeof resolvedXMm === 'number' && Number.isFinite(resolvedXMm) && typeof resolvedYMm === 'number' && Number.isFinite(resolvedYMm))) {
         throw new Error('Place series by clicking on the SVG first (missing x_mm/y_mm)');
