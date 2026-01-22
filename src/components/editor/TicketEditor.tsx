@@ -307,9 +307,10 @@ export const TicketEditor: React.FC<TicketEditorProps> = ({ pdfUrl, fileType = '
     if (!seriesSlots.length) return;
     setSeriesSlots((prev) =>
       prev.map((slot) => {
+        if (slot.startingSeries) return slot;
         const desired = startingSeries;
         const newLetterStyles = desired.split('').map((_, idx) => slot.letterStyles?.[idx] || { fontSize: slot.defaultFontSize, offsetY: 0 });
-        return { ...slot, value: desired, startingSeries: desired, letterStyles: newLetterStyles };
+        return { ...slot, value: desired, letterStyles: newLetterStyles };
       })
     );
   }, [seriesSlots.length, startingSeries]);
@@ -667,37 +668,61 @@ export const TicketEditor: React.FC<TicketEditorProps> = ({ pdfUrl, fileType = '
       }
 
       const jobId = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? (crypto as any).randomUUID() : `${Date.now()}-${Math.random()}`;
-      const primarySlot = selectedSlot ?? seriesSlots[0] ?? null;
-      const resolvedXMm = primarySlot?.x_mm ?? null;
-      const resolvedYMm = primarySlot?.y_mm ?? null;
-      const resolvedRotationDeg = Number(primarySlot?.rotation ?? 0);
-      const resolvedColor = String(primarySlot?.color || '#000000');
-      const resolvedFontFamily = String((primarySlot as any)?.fontFamily || 'Helvetica');
-
       const pxToMm = (px: number) => px * 0.264583;
-      const resolvedLetterSpacingMm = (() => {
-        const px = Number((primarySlot as any)?.letterSpacingPx ?? 0);
-        return Number.isFinite(px) && px > 0 ? pxToMm(px) : 0;
-      })();
-      const slotDefaultFontSizePx = Number(primarySlot?.defaultFontSize);
-      if (!(Number.isFinite(slotDefaultFontSizePx) && slotDefaultFontSizePx > 0)) {
-        throw new Error('Invalid default font size (px)');
-      }
-      const resolvedFontSizeMm = pxToMm(slotDefaultFontSizePx);
-      const perLetterFontSizeMm = (() => {
-        if (!primarySlot?.value) return undefined;
-        const chars = String(primarySlot.value).split('');
-        const sizes = chars.map((_, idx) => {
-          const px = Number(primarySlot.letterStyles?.[idx]?.fontSize ?? slotDefaultFontSizePx);
-          return Number.isFinite(px) && px > 0 ? pxToMm(px) : resolvedFontSizeMm;
-        });
-        const hasCustomization = sizes.some((mm) => Math.abs(mm - resolvedFontSizeMm) > 1e-6);
-        return hasCustomization ? sizes : undefined;
-      })();
 
-      if (!(typeof resolvedXMm === 'number' && Number.isFinite(resolvedXMm) && typeof resolvedYMm === 'number' && Number.isFinite(resolvedYMm))) {
-        throw new Error('Place series by clicking on the SVG first (missing x_mm/y_mm)');
+      if (!seriesSlots.length) {
+        throw new Error('Add at least one series slot');
       }
+
+      const seriesList = seriesSlots.map((slot) => {
+        const slotX = slot.x_mm;
+        const slotY = slot.y_mm;
+        if (!(typeof slotX === 'number' && Number.isFinite(slotX) && typeof slotY === 'number' && Number.isFinite(slotY))) {
+          throw new Error('Place all series slots by clicking/dragging on the SVG first (missing x_mm/y_mm)');
+        }
+
+        const slotDefaultFontSizePx = Number(slot.defaultFontSize);
+        if (!(Number.isFinite(slotDefaultFontSizePx) && slotDefaultFontSizePx > 0)) {
+          throw new Error('Invalid default font size (px)');
+        }
+        const fontSizeMm = pxToMm(slotDefaultFontSizePx);
+
+        const letterSpacingMm = (() => {
+          const px = Number((slot as any)?.letterSpacingPx ?? 0);
+          return Number.isFinite(px) && px > 0 ? pxToMm(px) : 0;
+        })();
+
+        const perLetterFontSizeMm = (() => {
+          const value = String(slot.value || slot.startingSeries || startingSeries || '');
+          if (!value) return undefined;
+          const chars = value.split('');
+          const sizes = chars.map((_, idx) => {
+            const px = Number(slot.letterStyles?.[idx]?.fontSize ?? slotDefaultFontSizePx);
+            return Number.isFinite(px) && px > 0 ? pxToMm(px) : fontSizeMm;
+          });
+          const hasCustomization = sizes.some((mm) => Math.abs(mm - fontSizeMm) > 1e-6);
+          return hasCustomization ? sizes : undefined;
+        })();
+
+        const start = String(slot.startingSeries || slot.value || startingSeries || '').trimEnd();
+        if (!start) throw new Error('Series start is required for each slot');
+
+        const step = Number.isFinite(Number((slot as any).seriesIncrement)) ? Number((slot as any).seriesIncrement) : 1;
+
+        return {
+          start,
+          count: totalTickets,
+          fontFamily: String((slot as any)?.fontFamily || 'Helvetica'),
+          fontSizeMm,
+          perLetterFontSizeMm,
+          xMm: slotX,
+          yMm: slotY,
+          letterSpacingMm,
+          rotationDeg: Number(slot.rotation ?? 0),
+          color: String(slot.color || '#000000'),
+          ...(step !== 1 ? { step } : {}),
+        };
+      });
 
       const payload = buildFinalRenderPayload({
         jobId,
@@ -710,16 +735,7 @@ export const TicketEditor: React.FC<TicketEditorProps> = ({ pdfUrl, fileType = '
         objectRotationDeg: ticketCropMm?.rotationDeg,
         objectKeepProportions: ticketCropMm?.keepProportions,
         objectCutMarginMm: ticketCropMm?.cutMarginMm,
-        seriesStart: primaryBaseSeries,
-        seriesCount: totalPages * 4,
-        seriesXMm: resolvedXMm,
-        seriesYMm: resolvedYMm,
-        seriesFontFamily: resolvedFontFamily,
-        seriesFontSizeMm: resolvedFontSizeMm,
-        perLetterFontSizeMm,
-        seriesLetterSpacingMm: resolvedLetterSpacingMm,
-        seriesRotationDeg: resolvedRotationDeg,
-        seriesColor: resolvedColor,
+        seriesList,
         customFonts,
         overlays: overlay
           ? [

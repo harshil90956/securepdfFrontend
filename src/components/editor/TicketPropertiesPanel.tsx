@@ -44,6 +44,34 @@ export const TicketPropertiesPanel: React.FC<TicketPropertiesPanelProps> = ({
       </div>
 
       <div className="flex-1 p-4 space-y-4 overflow-y-auto">
+        <div className="space-y-3">
+          <Label className="text-xs text-muted-foreground uppercase tracking-wide">Series</Label>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs text-foreground">Starting Series (this slot)</Label>
+            <Input
+              value={slot.startingSeries ?? ''}
+              onChange={(e) => onUpdateSlot({ startingSeries: e.target.value })}
+              placeholder="e.g. A001 or A 001"
+              className="h-8 text-sm bg-background font-mono"
+            />
+            <p className="text-[10px] text-muted-foreground">Empty = uses global Starting Series</p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs text-foreground">Increment / Step</Label>
+            <Input
+              type="number"
+              value={Number(slot.seriesIncrement ?? 1)}
+              onChange={(e) => onUpdateSlot({ seriesIncrement: Math.max(1, parseInt(e.target.value) || 1) })}
+              min={1}
+              className="h-8 text-sm bg-background"
+            />
+          </div>
+        </div>
+
+        <Separator />
+
         {/* Per-Letter Font Size Control */}
         <div className="space-y-3">
           <Label className="text-xs text-muted-foreground uppercase tracking-wide flex items-center gap-2">
