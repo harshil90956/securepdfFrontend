@@ -36,6 +36,8 @@ const Upload = () => {
   const [overrideAlignment, setOverrideAlignment] = useState<'left' | 'center' | 'right' | 'default'>('default');
   const [overrideKeepProportions, setOverrideKeepProportions] = useState<'default' | 'on' | 'off'>('default');
 
+  const [objectsPerPage, setObjectsPerPage] = useState<'4' | '3'>('4');
+
   const [searchEmail, setSearchEmail] = useState('');
   const [selectedAdminTarget, setSelectedAdminTarget] = useState<
     { id: string; email: string } | null
@@ -97,6 +99,7 @@ const Upload = () => {
     setOverrideRotationDeg('');
     setOverrideAlignment('default');
     setOverrideKeepProportions('default');
+    setObjectsPerPage('4');
   };
 
   const handleUpload = async () => {
@@ -188,6 +191,7 @@ const Upload = () => {
         remainingPrints: String(data.document?.remainingPrints ?? data.remainingPrints ?? ''),
         maxPrints: String(data.document?.maxPrints ?? data.maxPrints ?? ''),
         documentType: uploadedDocumentType,
+        objectsPerPage: String(objectsPerPage || '4'),
       });
 
       navigate(`/viewer?${params.toString()}`, {
@@ -199,6 +203,7 @@ const Upload = () => {
           maxPrints: data.document?.maxPrints ?? data.maxPrints,
           documentType: uploadedDocumentType,
           ticketCropMm: ticketCropMmForClient,
+          objectsPerPage: Number(objectsPerPage) === 3 ? 3 : 4,
         },
       });
     } catch (error) {
@@ -534,6 +539,23 @@ const Upload = () => {
                         <SelectItem value="default">Default</SelectItem>
                         <SelectItem value="on">ON</SelectItem>
                         <SelectItem value="off">OFF</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="text-xs text-muted-foreground">Objects Per Page (output)</div>
+                    <Select
+                      value={objectsPerPage}
+                      onValueChange={(v) => setObjectsPerPage(v as '4' | '3')}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="4" />
+                      </SelectTrigger>
+
+                      <SelectContent>
+                        <SelectItem value="4">4</SelectItem>
+                        <SelectItem value="3">3</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>

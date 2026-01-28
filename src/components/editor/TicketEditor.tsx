@@ -25,6 +25,7 @@ interface TicketEditorProps {
   pdfUrl?: string | null;
   fileType?: 'pdf' | 'svg';
   ticketCropMm?: TicketCropMmOverride | null;
+  objectsPerPage?: 3 | 4;
 }
 
 export type TicketOnPage = {
@@ -73,7 +74,7 @@ type SvgOverlaySession = {
   intrinsicMmH: number;
 };
 
-export const TicketEditor: React.FC<TicketEditorProps> = ({ pdfUrl, fileType = 'pdf', ticketCropMm }: TicketEditorProps) => {
+export const TicketEditor: React.FC<TicketEditorProps> = ({ pdfUrl, fileType = 'pdf', ticketCropMm, objectsPerPage = 4 }: TicketEditorProps) => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { token } = useAuth();
@@ -735,6 +736,7 @@ export const TicketEditor: React.FC<TicketEditorProps> = ({ pdfUrl, fileType = '
         objectRotationDeg: ticketCropMm?.rotationDeg,
         objectKeepProportions: ticketCropMm?.keepProportions,
         objectCutMarginMm: ticketCropMm?.cutMarginMm,
+        renderMode: objectsPerPage === 3 ? 'exact_mm_3up' : 'exact_mm',
         seriesList,
         customFonts,
         overlays: overlay

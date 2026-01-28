@@ -1,6 +1,7 @@
 export type FinalRenderPayload = {
   job_id: string;
   svg_s3_key: string;
+  render_mode?: string;
   custom_fonts?: {
     family: string;
     data_url: string;
@@ -74,6 +75,7 @@ const toFiniteNumberOrNull = (raw: unknown): number | null => {
 export function buildFinalRenderPayload(params: {
   jobId: string;
   documentId: string;
+  renderMode?: string;
   objectWidthMm: unknown;
   objectHeightMm: unknown;
   objectXMm: unknown;
@@ -217,6 +219,8 @@ export function buildFinalRenderPayload(params: {
   // SVG uploads are stored by backend at documents/raw/{documentId}.svg
   const svg_s3_key = `documents/raw/${documentId}.svg`;
 
+  const render_mode = typeof params.renderMode === 'string' && params.renderMode.trim() ? params.renderMode.trim() : null;
+
   const custom_fonts = Array.isArray(params.customFonts)
     ? params.customFonts
         .map((f) => ({
@@ -274,11 +278,10 @@ export function buildFinalRenderPayload(params: {
 
   const overlays = [...imageOverlays, ...svgOverlays];
 
-  return {
+  const payload: FinalRenderPayload = {
     job_id,
     svg_s3_key,
-    ...(custom_fonts && custom_fonts.length ? { custom_fonts } : {}),
-    ...(overlays && overlays.length ? { overlays } : {}),
+    ...(render_mode ? { render_mode } : {}),
     object_mm: {
       w,
       h,
@@ -289,6 +292,8 @@ export function buildFinalRenderPayload(params: {
       keep_proportions,
       cut_margin_mm,
     },
+    ...(custom_fonts && custom_fonts.length ? { custom_fonts } : {}),
+    ...(overlays && overlays.length ? { overlays } : {}),
     ...(hasSeriesList
       ? {
           series_list,
@@ -312,4 +317,6 @@ export function buildFinalRenderPayload(params: {
           },
         }),
   };
+
+  return payload;
 }

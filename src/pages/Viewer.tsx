@@ -30,6 +30,7 @@ type ViewerNavState = {
   remainingPrints?: number;
   maxPrints?: number;
   ticketCropMm?: TicketCropMmOverride | null;
+  objectsPerPage?: 3 | 4;
 };
 
 type SecureRenderStatus = 'CREATED' | 'BATCH_RUNNING' | 'MERGE_RUNNING' | 'READY' | 'FAILED';
@@ -60,6 +61,12 @@ const Viewer = () => {
     return raw === 'svg' ? 'svg' : 'pdf';
   }, [searchParams, state.documentType]);
   const ticketCropMmFromState = state.ticketCropMm ?? undefined;
+
+  const objectsPerPage = useMemo(() => {
+    const raw = state.objectsPerPage ?? searchParams.get('objectsPerPage');
+    const n = Number(raw);
+    return n === 3 ? 3 : 4;
+  }, [searchParams, state.objectsPerPage]);
 
   const initialPrintsRaw = state.remainingPrints ?? searchParams.get('remainingPrints');
   const maxPrintsRaw = state.maxPrints ?? searchParams.get('maxPrints');
@@ -522,7 +529,7 @@ const Viewer = () => {
       {/* Main content: editor only for admin, pure viewer for regular users */}
       <div className="flex-1 min-h-0 flex flex-row">
         {user?.role === 'admin' ? (
-          <TicketEditor pdfUrl={pdfUrl} fileType={documentType} ticketCropMm={ticketCropMm} />
+          <TicketEditor pdfUrl={pdfUrl} fileType={documentType} ticketCropMm={ticketCropMm} objectsPerPage={objectsPerPage} />
         ) : (
           <div className="h-full w-full bg-[#0b1220]">
             <div className="w-full h-full">
